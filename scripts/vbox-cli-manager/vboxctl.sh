@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # ==============================================================================
-# vboxctl.sh - Интерактивный CLI-менеджер для VirtualBox
+# vboxctl.sh - CLI/TUI менеджер для VirtualBox (Flicker-Free)
 # ==============================================================================
 
 CONFIG_FILE="$HOME/.config/vbox_control.conf"
-TIMEOUT=60  # Время ожидания мягкого выключения (в секундах)
+TIMEOUT=60  # Время ожидания мягкого выключения (секунды)
 
 # Проверка наличия vboxmanage
 if ! command -v vboxmanage &> /dev/null; then
@@ -24,7 +24,6 @@ set_default_vm() {
   local vm_name="$1"
   mkdir -p "$(dirname "$CONFIG_FILE")"
   echo "$vm_name" > "$CONFIG_FILE"
-  echo "ВМ '$vm_name' установлена по умолчанию."
 }
 
 # Вспомогательные функции VirtualBox
@@ -105,59 +104,92 @@ if [ -n "$1" ]; then
   exit 1
 fi
 
-# ИНТЕРАКТИВНЫЙ ИНТЕРФЕЙС
+# ==============================================================================
+# TUI РЕЖИМ БЕЗ МЕРЦАНИЯ
+# ==============================================================================
 
-# Функция меню с чисткой экрана на каждой итерации
+cleanup_tui() {
+  tput cnorm  # Показать курсор
+  tput rmcup  # Вернуть стандартный буфер экрана
+}
+
+init_tui() {
+  tput smcup  # Переключить на альтернативный буфер
+  tput civis  # Скрыть курсор
+  trap 'cleanup_tui; exit' INT TERM EXIT
+}
+
+# Отрисовка пунктов меню без полной очистки экрана
+render_options() {
+  local cur=$1
+  shift
+  local options=("$@")
+
+  for i in "${!options[@]}"; do
+    if [ $i -eq $cur ]; then
+      echo -e " \033[1;32m❯ ${options[$i]}\033[0m\033[K"
+    else
+      echo -e "   ${options[$i]}\033[K"
+    fi
+  done
+}
+
 select_option() {
   local prompt="$1"
-  local header_func="$2"  # Кастомный заголовок (например, с информацией о ВМ)
+  local header_func="$2"
   shift 2
   local options=("$@")
   local cur=0
   local count=${#options[@]}
   local key
 
-  trap 'tput cnorm; clear; exit' INT TERM
-  tput civis
+  # 1. Полная очистка один раз при входе в меню
+  tput cup 0 0
+  tput ed
 
+  # 2. Отрисовка зафиксированного заголовка один раз
+  if [ -n "$header_func" ] && declare -f "$header_func" > /dev/null; then
+    "$header_func"
+  fi
+
+  echo "$prompt"
+  echo ""
+
+  # 3. Первичная отрисовка списка
+  render_options $cur "${options[@]}"
+
+  # 4. Цикл обработки нажатий (точечная перерисовка)
   while true; do
-    clear
-    
-    # Отрисовка зафиксированного заголовка/инфо-блока, если передан
-    if [ -n "$header_func" ] && declare -f "$header_func" > /dev/null; then
-      "$header_func"
-    fi
-
-    echo -e "$prompt\n"
-    for i in "${!options[@]}"; do
-      if [ $i -eq $cur ]; then
-        echo -e " \033[1;32m❯ ${options[$i]}\033[0m"
-      else
-        echo "   ${options[$i]}"
-      fi
-    done
-
-    # Чтение клавиш
     read -rsn1 key
     if [[ $key == $'\x1b' ]]; then
       read -rsn2 key
+      prev=$cur
       if [[ $key == '[A' ]]; then # Нажата стрелка ВВЕРХ
         cur=$(( (cur - 1 + count) % count ))
       elif [[ $key == '[B' ]]; then # Нажата стрелка ВНИЗ
         cur=$(( (cur + 1) % count ))
       fi
-    elif [[ $key == "" ]]; then # Нажат ENTER
-      tput cnorm
-      clear
+
+      # Перерисовываем только если позиция изменилась
+      if [ $cur -ne $prev ]; then
+        tput cuu $count # Возвращаем курсор на N строк вверх (к началу списка)
+        render_options $cur "${options[@]}"
+      fi
+    elif [[ $key == "" ]]; then # Enter
       return $cur
     fi
   done
 }
 
-# 1. Меню выбора ВМ
+# Запуск TUI
+init_tui
+
+# 1. Выбор ВМ
 mapfile -t VM_LIST < <(get_all_vms)
 
 if [ ${#VM_LIST[@]} -eq 0 ]; then
+  cleanup_tui
+  trap - INT TERM EXIT
   echo "Виртуальные машины VirtualBox не найдены."
   exit 0
 fi
@@ -168,24 +200,24 @@ MAIN_PROMPT="Выберите виртуальную машину (По умол
 select_option "$MAIN_PROMPT" "" "${VM_LIST[@]}"
 SELECTED_VM="${VM_LIST[$?]}"
 
-# 2. Вывод зафиксированной информации о выбранной ВМ
+# 2. Отрисовка инфо-панели и выбор действия
 print_vm_info() {
   local state cpus ram
   state=$(get_vm_state "$SELECTED_VM")
   cpus=$(vboxmanage showvminfo "$SELECTED_VM" --machinereadable 2>/dev/null | grep "^cpus=" | cut -d'=' -f2)
   ram=$(vboxmanage showvminfo "$SELECTED_VM" --machinereadable 2>/dev/null | grep "^memory=" | cut -d'=' -f2)
 
-  echo -e "========================================"
+  echo "----------------------------------------"
   echo -e " Информация о ВМ: \033[1;34m$SELECTED_VM\033[0m"
-  echo -e "========================================"
+  echo "----------------------------------------"
   echo " Статус:   $state"
   echo " CPU:      $cpus core(s)"
   echo " RAM:      $ram MB"
   [ "$SELECTED_VM" = "$DEFAULT_VM" ] && echo " Дефолт:  Да"
-  echo -e "========================================\n"
+  echo "----------------------------------------"
+  echo ""
 }
 
-# 3. Меню действий
 ACTIONS=(
   "Запустить (headless)"
   "Остановить (soft shutdown)"
@@ -197,6 +229,10 @@ ACTIONS=(
 select_option "Выберите действие для '$SELECTED_VM':" "print_vm_info" "${ACTIONS[@]}"
 ACTION_INDEX=$?
 
+# Выход из TUI перед выполнением команды
+cleanup_tui
+trap - INT TERM EXIT
+
 case $ACTION_INDEX in
   0)
     echo "Запуск $SELECTED_VM..."
@@ -207,6 +243,7 @@ case $ACTION_INDEX in
     ;;
   2)
     set_default_vm "$SELECTED_VM"
+    echo "ВМ '$SELECTED_VM' успешно установлена по умолчанию."
     ;;
   3)
     read -p "Вы уверены, что хотите полностью удалить ВМ '$SELECTED_VM'? (y/N): " confirm
