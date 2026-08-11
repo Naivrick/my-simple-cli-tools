@@ -22,27 +22,11 @@
 
 ## ⚡️ Быстрый запуск
 
-### 1. Запуск одной командой (без скачивания)
 ```bash
-curl -sSL [https://raw.githubusercontent.com/ВАШ_USERNAME/ВАШ_РЕПОЗИТОРИЙ/main/server_diag.sh](https://raw.githubusercontent.com/ВАШ_USERNAME/ВАШ_РЕПОЗИТОРИЙ/main/server_diag.sh) | bash
-```
-
-### 2. Классическая установка
-```bash
-# Клонирование репозитория
-git clone [https://github.com/ВАШ_USERNAME/ВАШ_РЕПОЗИТОРИЙ.git](https://github.com/ВАШ_USERNAME/ВАШ_РЕПОЗИТОРИЙ.git)
-cd ВАШ_РЕПОЗИТОРИЙ
-
-# Выдача прав на исполнение
-chmod +x server_diag.sh
-
-# Запуск
-./server_diag.sh
+curl -sSL https://raw.githubusercontent.com/Naivrick/my-simple-cli-tools/refs/heads/main/scripts/Mini%20Diagnostic/server_diag.sh | bash
 ```
 
 > 💡 **Совет:** Для полного доступа к метрикам Fail2ban, логам SSH и сокету Docker рекомендуем запускать скрипт от пользователя с правами `sudo` или добавить пользователя в группу `docker`: `sudo usermod -aG docker $USER`.
-
----
 
 ## ⚙️ Совместимость
 * **ОС:** Ubuntu 20.04 / 22.04 / 24.04, Debian 10 / 11 / 12
